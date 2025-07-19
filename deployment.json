@@ -1,0 +1,23 @@
+{
+  "contractAddress": "0x7C024CC107f3A07ca51E20bD512018407352B901",
+  "deployer": "0x16C9f9e96e4F53C91bAac6ed5c650FF1943DE4d8",
+  "network": {
+    "name": "Polygon - Mainnet",
+    "chainId": 137,
+    "rpcUrl": "https://rpc-mainnet.matic.quiknode.pro",
+    "explorerUrl": "https://polygonscan.com",
+    "nativeCurrency": {
+      "name": "POL",
+      "symbol": "POL",
+      "decimals": 18
+    }
+  },
+  "token": {
+    "name": "MyToken",
+    "symbol": "MYT",
+    "decimals": 18,
+    "totalSupply": 1000000000
+  },
+  "deploymentTransaction": "0xab4309348781bebf2b48ff399935c9d8cdcef6cb312c822de7b0081d5c5dd458",
+  "timestamp": "2025-07-19T14:43:14.619Z"
+}

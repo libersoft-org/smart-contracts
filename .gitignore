@@ -1,0 +1,9 @@
+.vscode/
+node_modules/
+build/
+config/
+config/config.json
+config/wallets.json
+.secret_git
+bun.lockb
+bun.lock
