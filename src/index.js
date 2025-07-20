@@ -62,9 +62,10 @@ class SmartContactsDeploymentTool {
 				{ title: '1. Wallet Management', value: 'wallets' },
 				{ title: '2. Select Active Wallet & Address', value: 'selectWallet' },
 				{ title: '3. Select Network & RPC', value: 'selectNetwork' },
-				{ title: '4. Deploy Token', value: 'deploy' },
-				{ title: '5. Token Utilities', value: 'utils' },
-				{ title: '6. Exit', value: 'exit' },
+				{ title: '4. Block Explorer API Keys', value: 'apiKeys' },
+				{ title: '5. Deploy Token', value: 'deploy' },
+				{ title: '6. Token Utilities', value: 'utils' },
+				{ title: '7. Exit', value: 'exit' },
 			],
 		});
 
@@ -77,6 +78,9 @@ class SmartContactsDeploymentTool {
 				break;
 			case 'selectNetwork':
 				await this.selectActiveNetwork();
+				break;
+			case 'apiKeys':
+				await this.apiKeysManagement();
 				break;
 			case 'deploy':
 				await this.deployToken();
@@ -634,6 +638,169 @@ class SmartContactsDeploymentTool {
 				message: 'RPC connection failed',
 			};
 		}
+	}
+
+	async apiKeysManagement() {
+		console.clear();
+		console.log('Block Explorer API Keys');
+		console.log('=======================');
+		console.log('');
+
+		const explorers = this.loadExplorers();
+		const networks = this.networkManager.getNetworks();
+
+		// Show current status for all networks that have explorers
+		console.log('Current API Keys Status:');
+		for (const network of networks) {
+			const chainId = network.chainId.toString();
+			const hasKey = explorers[chainId] ? '✓ Set' : '✗ Not set';
+			const explorerName = this.getExplorerName(network.explorerURL);
+			console.log(`${network.name} (${chainId}): ${hasKey} ${explorerName ? `- ${explorerName}` : ''}`);
+		}
+		console.log('');
+
+		// Create choices from available networks
+		const choices = [];
+		for (const network of networks) {
+			const chainId = network.chainId.toString();
+			const explorerName = this.getExplorerName(network.explorerURL);
+			if (explorerName) {
+				choices.push({
+					title: `Set ${network.name} API Key (${explorerName})`,
+					value: chainId,
+				});
+			}
+		}
+
+		choices.push({ title: 'View API Key Help', value: 'help' }, { title: 'Back to main menu', value: 'back' });
+
+		const response = await prompts({
+			type: 'select',
+			name: 'action',
+			message: 'What would you like to do?',
+			choices: choices,
+		});
+
+		if (response.action === 'back') {
+			await this.showMainMenu();
+			return;
+		}
+
+		if (response.action === 'help') {
+			await this.showApiKeyHelp();
+			return;
+		}
+
+		// Set API key
+		await this.setApiKey(response.action);
+	}
+
+	getExplorerName(explorerUrl) {
+		if (!explorerUrl) return null;
+
+		const url = explorerUrl.toLowerCase();
+		if (url.includes('etherscan')) return 'Etherscan';
+		if (url.includes('polygonscan')) return 'PolygonScan';
+		if (url.includes('bscscan')) return 'BSCScan';
+		if (url.includes('snowtrace')) return 'Snowtrace';
+		if (url.includes('ftmscan')) return 'FTMScan';
+		if (url.includes('arbiscan')) return 'Arbiscan';
+		if (url.includes('optimistic')) return 'Optimistic Etherscan';
+		if (url.includes('basescan')) return 'BaseScan';
+
+		// Generic fallback
+		try {
+			const domain = new URL(explorerUrl).hostname;
+			return domain.charAt(0).toUpperCase() + domain.slice(1);
+		} catch {
+			return 'Explorer';
+		}
+	}
+
+	async setApiKey(chainId) {
+		// Find network name by chainId
+		const networks = this.networkManager.getNetworks();
+		let networkName = '';
+		let explorerName = '';
+		for (const network of networks) {
+			if (network.chainId.toString() === chainId) {
+				networkName = network.name;
+				explorerName = this.getExplorerName(network.explorerURL);
+				break;
+			}
+		}
+		const response = await prompts({
+			type: 'text',
+			name: 'apiKey',
+			message: `Enter your ${networkName} (${explorerName}) API key:`,
+		});
+		if (response.apiKey && response.apiKey.trim() !== '') {
+			const explorers = this.loadExplorers();
+			explorers[chainId] = response.apiKey;
+			this.saveExplorers(explorers);
+			console.log('✓ API key saved successfully!');
+		} else if (response.apiKey === '') {
+			console.log('⚠️ Empty API key not saved');
+		}
+		await this.waitForEnter();
+		await this.apiKeysManagement();
+	}
+
+	async showApiKeyHelp() {
+		console.clear();
+		console.log('API Key Help');
+		console.log('============');
+		console.log('');
+		console.log('To get API keys for contract verification:');
+		console.log('');
+		// Dynamically list all networks with block explorers
+		const networks = this.networkManager.getNetworks();
+		let counter = 1;
+		for (const network of networks) {
+			if (network.explorerURL) {
+				try {
+					const url = new URL(network.explorerURL);
+					const apiUrl = `${url.protocol}//${url.hostname}/apis`;
+					console.log(`${counter}. ${network.name}: ${apiUrl}`);
+					counter++;
+				} catch {
+					// Skip networks with invalid explorer URLs
+					continue;
+				}
+			}
+		}
+		console.log('');
+		console.log('Steps:');
+		console.log('1. Visit the URL for your desired network');
+		console.log('2. Create a free account');
+		console.log('3. Generate a new API key');
+		console.log('4. Copy the API key and paste it here');
+		console.log('');
+		console.log('Note: API keys are optional but enable automatic');
+		console.log('contract verification after deployment.');
+		await this.waitForEnter();
+		await this.apiKeysManagement();
+	}
+
+	loadExplorers() {
+		const explorersFile = './config/explorers.json';
+		if (!existsSync(explorersFile)) {
+			// Create empty explorers.json - entries will be added only when API keys are set
+			const defaultExplorers = {};
+			writeFileSync(explorersFile, JSON.stringify(defaultExplorers, null, 2));
+			return defaultExplorers;
+		}
+		return JSON.parse(readFileSync(explorersFile, 'utf8'));
+	}
+
+	saveExplorers(explorers) {
+		const explorersFile = './config/explorers.json';
+		writeFileSync(explorersFile, JSON.stringify(explorers, null, 2));
+	}
+
+	getApiKeyForChain(chainId) {
+		const explorers = this.loadExplorers();
+		return explorers[chainId.toString()] || null;
 	}
 
 	async start() {

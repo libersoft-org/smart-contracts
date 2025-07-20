@@ -20,7 +20,7 @@ export class NetworkManager {
 					symbol: network.currency.symbol,
 					decimals: 18,
 				},
-				explorerUrl: network.explorerURL,
+				explorerURL: network.explorerURL,
 			};
 		});
 		return networksObject;
@@ -28,6 +28,10 @@ export class NetworkManager {
 
 	getNetworkNames() {
 		return Object.keys(this.networks);
+	}
+
+	getNetworks() {
+		return Object.values(this.networks);
 	}
 
 	getNetwork(networkName) {

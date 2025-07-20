@@ -68,16 +68,31 @@ if (output.errors) {
 // Check for successful compilation
 if (output.contracts && output.contracts['Token.sol'] && output.contracts['Token.sol']['Token']) {
 	const contract = output.contracts['Token.sol']['Token'];
+	
+	// Get bytecode (creation) and deployed bytecode
+	const deployedBytecode = contract.evm.deployedBytecode?.object || '';
+	
 	const result = {
 		abi: contract.abi,
 		bytecode: '0x' + contract.evm.bytecode.object,
+		deployedBytecode: deployedBytecode ? '0x' + deployedBytecode : null
 	};
 	// Ensure build directory exists
 	if (!fs.existsSync('./build')) fs.mkdirSync('./build', { recursive: true });
 	fs.writeFileSync('./build/Token.json', JSON.stringify(result, null, 2));
+	
+	// Also save full compilation output for verification
+	fs.writeFileSync('./compile-output-full.json', JSON.stringify(output, null, 2));
+	
 	console.log('✓ OpenZeppelin ERC20 contract compiled successfully');
 	console.log('✓ Results saved to build/Token.json');
+	console.log('✓ Full output saved to compile-output-full.json');
 	console.log('✓ Contract bytecode length:', result.bytecode.length);
+	if (result.deployedBytecode) {
+		console.log('✓ Deployed bytecode length:', result.deployedBytecode.length);
+	} else {
+		console.log('ℹ No deployed bytecode available');
+	}
 } else {
 	console.error('Compilation failed - no contract output found');
 	if (output.contracts) {

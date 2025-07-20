@@ -19,7 +19,7 @@ Interactive application for deploying smart contracts to EVM-compatible blockcha
 2. Install dependencies:
 
 ```bash
-bun install
+bun i
 ```
 
 ## Usage
@@ -65,12 +65,28 @@ The application provides an interactive menu with the following options:
 - Deploy it on blockchain
 - Verify source code on block explorer
 
-5. **Token utilities**
+5. **Block Explorer API Keys**
+
+- Configure API keys for contract verification
+- Organized by blockchain network (chainId)
+- Keys stored securely in config directory
+
+6. **Token utilities**
 
 - View token information
 - Transfer tokens
 - Check balances
 - Token management
+
+## Contract Verification
+
+The tool supports automatic contract verification on block explorers after deployment. To enable this feature:
+
+1. Go to **"Block Explorer API Keys"** in the main menu
+2. Set API keys for your desired networks
+3. Deploy contracts - they will be automatically verified
+
+Without API keys, contracts will deploy successfully but won't be automatically verified.
 
 ## License
 

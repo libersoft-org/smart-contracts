@@ -1,9 +1,11 @@
 import { ethers } from 'ethers';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { ContractVerifier } from './ContractVerifier.js';
 
 export class TokenDeployer {
 	constructor() {
 		this.deploymentFile = './config/deployment.json';
+		this.verifier = new ContractVerifier();
 	}
 
 	async deploy(tokenConfig, networkConfig, walletInfo) {
@@ -40,22 +42,66 @@ export class TokenDeployer {
 			const contractAddress = await contract.getAddress();
 			console.log('✓ Token deployed successfully!');
 			console.log('Contract address:', contractAddress);
-			console.log('Explorer:', networkConfig.explorerUrl + '/address/' + contractAddress);
+			console.log('Explorer:', networkConfig.explorerURL + '/address/' + contractAddress);
 			// Save deployment information
 			const deploymentInfo = {
 				contractAddress: contractAddress,
 				deployer: walletInfo.address,
-				network: { chainId: networkConfig.chainId },
+				networkChainId: networkConfig.chainId,
 				token: tokenConfig,
 				deploymentTransaction: contract.deploymentTransaction().hash,
 				timestamp: new Date().toISOString(),
 			};
 			writeFileSync(this.deploymentFile, JSON.stringify(deploymentInfo, null, 2));
 			console.log('✓ Deployment info saved to config/deployment.json');
+			// Contract verification
+			await this.attemptVerification(contractAddress, networkConfig.chainId, tokenConfig);
 			return deploymentInfo;
 		} catch (error) {
 			console.error('Deployment failed:', error.message);
 			throw error;
+		}
+	}
+
+	async attemptVerification(contractAddress, chainId, tokenConfig) {
+		console.log('\n--- Contract Verification ---');
+		// Get API key from config
+		const apiKey = this.getApiKeyForChain(chainId);
+		if (!apiKey) {
+			console.log('⚠️ No API key found for verification');
+			console.log('Configure API keys in "Block Explorer API Keys" menu');
+			return;
+		}
+		console.log('🔍 API key found, attempting verification...');
+		try {
+			const verified = await this.verifier.verifyContract(contractAddress, chainId, tokenConfig, apiKey);
+			if (verified) {
+				console.log('✅ Contract verification completed successfully!');
+			} else {
+				console.log('❌ Contract verification failed');
+				console.log('You can verify manually on the block explorer');
+			}
+		} catch (error) {
+			console.log('❌ Verification failed:', error.message);
+			console.log('You can verify manually on the block explorer');
+		}
+		
+		// Wait for user to read the results
+		console.log('');
+		process.stdout.write('Press Enter to continue...');
+		await new Promise(resolve => {
+			process.stdin.once('data', () => resolve());
+		});
+	}
+
+	getApiKeyForChain(chainId) {
+		try {
+			const explorersFile = './config/explorers.json';
+			if (!existsSync(explorersFile)) return null;
+			const explorers = JSON.parse(readFileSync(explorersFile, 'utf8'));
+			return explorers[chainId.toString()] || null;
+		} catch (error) {
+			return null;
 		}
 	}
 
