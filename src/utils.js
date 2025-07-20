@@ -1,13 +1,21 @@
 import { ethers } from 'ethers';
 import { readFileSync, existsSync } from 'fs';
+import { NetworkManager } from './NetworkManager.js';
 
 export class TokenUtils {
 	constructor() {
-		this.deploymentFile = './deployment.json';
+		this.deploymentFile = './config/deployment.json';
+		this.configFile = './config/config.json';
+		this.networkManager = new NetworkManager();
+	}
+
+	loadConfig() {
+		if (!existsSync(this.configFile)) throw new Error('config.json not found');
+		return JSON.parse(readFileSync(this.configFile, 'utf8'));
 	}
 
 	loadDeploymentInfo() {
-		if (!existsSync(this.deploymentFile)) throw new Error('deployment.json not found. Deploy token first.');
+		if (!existsSync(this.deploymentFile)) throw new Error('config/deployment.json not found. Deploy token first.');
 		return JSON.parse(readFileSync(this.deploymentFile, 'utf8'));
 	}
 
@@ -15,10 +23,15 @@ export class TokenUtils {
 		try {
 			const deploymentInfo = this.loadDeploymentInfo();
 			const contractAddress = deploymentInfo.contractAddress;
-			const networkInfo = deploymentInfo.network;
+			const chainId = deploymentInfo.network.chainId;
+			const config = this.loadConfig();
+			// Get network config by chainId
+			const networkInfo = this.networkManager.getNetworkByChainId(chainId);
+			if (!networkInfo) throw new Error(`Network with chainId ${chainId} not found`);
 			const contractJson = JSON.parse(readFileSync('./build/Token.json', 'utf8'));
 			const { abi } = contractJson;
-			const provider = new ethers.JsonRpcProvider(networkInfo.rpcUrl);
+			// Use active RPC URL from config instead of default from networks
+			const provider = new ethers.JsonRpcProvider(config.activeRpcUrl);
 			const contract = new ethers.Contract(contractAddress, abi, provider);
 			const name = await contract.name();
 			const symbol = await contract.symbol();
@@ -42,10 +55,14 @@ export class TokenUtils {
 		try {
 			const deploymentInfo = this.loadDeploymentInfo();
 			const contractAddress = deploymentInfo.contractAddress;
-			const networkInfo = deploymentInfo.network;
+			const chainId = deploymentInfo.network.chainId;
+			const config = this.loadConfig();
+			// Get network config by chainId
+			const networkInfo = this.networkManager.getNetworkByChainId(chainId);
+			if (!networkInfo) throw new Error(`Network with chainId ${chainId} not found`);
 			const contractJson = JSON.parse(readFileSync('./build/Token.json', 'utf8'));
 			const { abi } = contractJson;
-			const provider = new ethers.JsonRpcProvider(networkInfo.rpcUrl);
+			const provider = new ethers.JsonRpcProvider(config.activeRpcUrl);
 			const contract = new ethers.Contract(contractAddress, abi, provider);
 			const balance = await contract.balanceOf(walletAddress);
 			const decimals = await contract.decimals();
@@ -59,10 +76,14 @@ export class TokenUtils {
 		try {
 			const deploymentInfo = this.loadDeploymentInfo();
 			const contractAddress = deploymentInfo.contractAddress;
-			const networkInfo = deploymentInfo.network;
+			const chainId = deploymentInfo.network.chainId;
+			const config = this.loadConfig();
+			// Get network config by chainId
+			const networkInfo = this.networkManager.getNetworkByChainId(chainId);
+			if (!networkInfo) throw new Error(`Network with chainId ${chainId} not found`);
 			const contractJson = JSON.parse(readFileSync('./build/Token.json', 'utf8'));
 			const { abi } = contractJson;
-			const provider = new ethers.JsonRpcProvider(networkInfo.rpcUrl);
+			const provider = new ethers.JsonRpcProvider(config.activeRpcUrl);
 			const wallet = new ethers.Wallet(fromPrivateKey, provider);
 			const contract = new ethers.Contract(contractAddress, abi, wallet);
 			const decimals = await contract.decimals();

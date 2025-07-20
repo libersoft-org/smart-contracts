@@ -21,7 +21,6 @@ class SmartContactsDeploymentTool {
 		this.activeNetwork = null;
 		this.activeRpcUrl = null;
 		this.configFile = './config/config.json';
-
 		// Load saved configuration
 		this.loadConfiguration();
 	}
@@ -43,7 +42,6 @@ class SmartContactsDeploymentTool {
 				console.log('Active RPC:', this.activeRpcUrl + ' (' + providerType + ')');
 			}
 		}
-
 		// Show native balance if wallet, network, and RPC are selected
 		if (this.activeWallet && this.activeAddress && this.activeNetwork && this.activeRpcUrl) {
 			const balanceInfo = await this.getNativeBalance();
@@ -55,9 +53,7 @@ class SmartContactsDeploymentTool {
 				}
 			}
 		}
-
 		console.log('');
-
 		const response = await prompts({
 			type: 'select',
 			name: 'action',
@@ -101,24 +97,17 @@ class SmartContactsDeploymentTool {
 		console.clear();
 		console.log('Wallet Management');
 		console.log('=================');
-
 		const walletNames = this.walletManager.getWalletNames();
 		const choices = [{ title: 'Add new wallet', value: 'add' }, ...walletNames.map(name => ({ title: name, value: name })), { title: 'Back to main menu', value: 'back' }];
-
 		const response = await prompts({
 			type: 'select',
 			name: 'action',
 			message: 'Select wallet or action:',
 			choices,
 		});
-
-		if (response.action === 'add') {
-			await this.addWallet();
-		} else if (response.action === 'back') {
-			await this.showMainMenu();
-		} else {
-			await this.manageWallet(response.action);
-		}
+		if (response.action === 'add') await this.addWallet();
+		else if (response.action === 'back') await this.showMainMenu();
+		else await this.manageWallet(response.action);
 	}
 
 	async addWallet() {
@@ -143,7 +132,6 @@ class SmartContactsDeploymentTool {
 			console.error('Error:', error.message);
 			await this.waitForEnter();
 		}
-
 		await this.walletManagement();
 	}
 
@@ -151,9 +139,7 @@ class SmartContactsDeploymentTool {
 		console.clear();
 		console.log('Manage Wallet:', walletName);
 		console.log('==============');
-
 		const addresses = this.walletManager.getAddresses(walletName);
-
 		const choices = [
 			{ title: 'Add new address', value: 'addAddress' },
 			{ title: 'Remove wallet', value: 'removeWallet' },
@@ -163,62 +149,49 @@ class SmartContactsDeploymentTool {
 			})),
 			{ title: 'Back', value: 'back' },
 		];
-
 		const response = await prompts({
 			type: 'select',
 			name: 'action',
 			message: 'Select action:',
 			choices,
 		});
-
 		if (!response.action) {
 			await this.walletManagement();
 			return;
 		}
-
-		if (response.action === 'addAddress') {
-			await this.addAddress(walletName);
-		} else if (response.action === 'removeWallet') {
-			await this.removeWallet(walletName);
-		} else if (response.action && response.action.startsWith('address_')) {
+		if (response.action === 'addAddress') await this.addAddress(walletName);
+		else if (response.action === 'removeWallet') await this.removeWallet(walletName);
+		else if (response.action && response.action.startsWith('address_')) {
 			const indexStr = response.action.split('_')[1];
 			const index = indexStr === '-1' ? -1 : parseInt(indexStr);
 			await this.manageAddress(walletName, index);
-		} else {
-			await this.walletManagement();
-		}
+		} else await this.walletManagement();
 	}
-
 	async addAddress(walletName) {
 		const response = await prompts({
 			type: 'number',
 			name: 'index',
 			message: 'Enter address index (0, 1, 2...):',
 		});
-
 		if (response.index === undefined) {
 			await this.manageWallet(walletName);
 			return;
 		}
-
 		try {
 			this.walletManager.addAddress(walletName, response.index);
 			console.log('✓ Address added successfully!');
 		} catch (error) {
 			console.error('Error:', error.message);
 		}
-
 		await this.waitForEnter();
 		await this.manageWallet(walletName);
 	}
-
 	async removeWallet(walletName) {
 		const confirm = await prompts({
 			type: 'confirm',
 			name: 'confirmed',
 			message: 'Are you sure you want to remove this wallet?',
 		});
-
 		if (confirm.confirmed) {
 			try {
 				this.walletManager.removeWallet(walletName);
@@ -227,7 +200,6 @@ class SmartContactsDeploymentTool {
 				console.error('Error:', error.message);
 			}
 		}
-
 		await this.waitForEnter();
 		await this.walletManagement();
 	}
@@ -236,7 +208,6 @@ class SmartContactsDeploymentTool {
 		console.clear();
 		console.log('Address Information');
 		console.log('===================');
-
 		try {
 			let addressInfo;
 			if (this.activeNetwork && this.activeRpcUrl) {
@@ -245,44 +216,34 @@ class SmartContactsDeploymentTool {
 			} else {
 				const addresses = this.walletManager.getAddresses(walletName);
 				addressInfo = addresses.find(addr => addr.index === addressIndex);
-				if (addressInfo) {
-					addressInfo.balance = 'Select network first';
-				}
+				if (addressInfo) addressInfo.balance = 'Select network first';
 			}
-
 			if (!addressInfo) {
 				console.log('Address not found');
 				await this.waitForEnter();
 				await this.manageWallet(walletName);
 				return;
 			}
-
 			console.log('Index:', addressInfo.index);
 			console.log('Address:', addressInfo.address);
 			console.log('Balance:', addressInfo.balance);
-			if (this.activeNetwork) {
-				console.log('Network:', this.activeNetwork);
-			}
-
+			if (this.activeNetwork) console.log('Network:', this.activeNetwork);
 			const choices = [
 				{ title: 'Remove this address', value: 'remove' },
 				{ title: 'Back', value: 'back' },
 			];
-
 			const response = await prompts({
 				type: 'select',
 				name: 'action',
 				message: 'Select action:',
 				choices,
 			});
-
 			if (response.action === 'remove') {
 				const confirm = await prompts({
 					type: 'confirm',
 					name: 'confirmed',
 					message: 'Remove this address?',
 				});
-
 				if (confirm.confirmed) {
 					this.walletManager.removeAddress(walletName, addressIndex);
 					console.log('✓ Address removed successfully!');
@@ -293,15 +254,12 @@ class SmartContactsDeploymentTool {
 			console.error('Error:', error.message);
 			await this.waitForEnter();
 		}
-
 		await this.manageWallet(walletName);
 	}
-
 	async selectActiveWallet() {
 		console.clear();
 		console.log('Select Active Wallet');
 		console.log('====================');
-
 		const walletNames = this.walletManager.getWalletNames();
 		if (walletNames.length === 0) {
 			console.log('No wallets found. Please add a wallet first.');
@@ -309,19 +267,16 @@ class SmartContactsDeploymentTool {
 			await this.showMainMenu();
 			return;
 		}
-
 		const walletResponse = await prompts({
 			type: 'select',
 			name: 'wallet',
 			message: 'Select wallet:',
 			choices: [...walletNames.map(name => ({ title: name, value: name })), { title: 'Back', value: 'back' }],
 		});
-
 		if (walletResponse.wallet === 'back') {
 			await this.showMainMenu();
 			return;
 		}
-
 		const addresses = this.walletManager.getAddresses(walletResponse.wallet);
 		if (addresses.length === 0) {
 			console.log('No addresses in this wallet. Please add an address first.');
@@ -329,7 +284,6 @@ class SmartContactsDeploymentTool {
 			await this.showMainMenu();
 			return;
 		}
-
 		const addressResponse = await prompts({
 			type: 'select',
 			name: 'address',
@@ -339,20 +293,16 @@ class SmartContactsDeploymentTool {
 				value: addr.index,
 			})),
 		});
-
 		if (addressResponse.address === undefined) {
 			await this.showMainMenu();
 			return;
 		}
-
 		this.activeWallet = walletResponse.wallet;
 		const selectedAddress = addresses.find(addr => addr.index === addressResponse.address);
 		this.activeAddress = selectedAddress.address;
 		this.activeAddressIndex = selectedAddress.index;
-
 		// Save configuration
 		this.saveConfiguration();
-
 		console.log('✓ Active wallet set:', this.activeWallet);
 		console.log('✓ Active address set:', this.activeAddress);
 		await this.waitForEnter();
@@ -363,54 +313,43 @@ class SmartContactsDeploymentTool {
 		console.clear();
 		console.log('Select Network');
 		console.log('==============');
-
 		const networkNames = this.networkManager.getNetworkNames();
-
 		const networkResponse = await prompts({
 			type: 'select',
 			name: 'network',
 			message: 'Select network:',
 			choices: [...networkNames.map(name => ({ title: name, value: name })), { title: 'Back', value: 'back' }],
 		});
-
 		if (networkResponse.network === 'back') {
 			await this.showMainMenu();
 			return;
 		}
-
 		console.log('Select RPC URL...');
 		const allUrls = this.networkManager.getAllRpcUrls(networkResponse.network);
-
 		const rpcChoices = allUrls.map(urlObj => ({
 			title: `${urlObj.url} (${this.networkManager.getProviderType(urlObj.url)})`,
 			value: urlObj.url,
 		}));
-
 		if (rpcChoices.length === 0) {
 			console.log('No RPC URLs found for this network.');
 			await this.waitForEnter();
 			await this.selectActiveNetwork();
 			return;
 		}
-
 		const rpcResponse = await prompts({
 			type: 'select',
 			name: 'rpcUrl',
 			message: 'Select RPC URL:',
 			choices: rpcChoices,
 		});
-
 		if (!rpcResponse.rpcUrl) {
 			await this.showMainMenu();
 			return;
 		}
-
 		this.activeNetwork = networkResponse.network;
 		this.activeRpcUrl = rpcResponse.rpcUrl;
-
 		// Save configuration
 		this.saveConfiguration();
-
 		console.log('✓ Active network set:', this.activeNetwork);
 		console.log('✓ Active RPC URL set:', this.activeRpcUrl);
 		await this.waitForEnter();
@@ -424,11 +363,9 @@ class SmartContactsDeploymentTool {
 			await this.showMainMenu();
 			return;
 		}
-
 		console.clear();
 		console.log('Deploy Token');
 		console.log('============');
-
 		const tokenConfig = await prompts([
 			{
 				type: 'text',
@@ -459,25 +396,17 @@ class SmartContactsDeploymentTool {
 		try {
 			console.log('Compiling contract...');
 			const compiled = await this.compiler.compile();
-			if (!compiled) {
-				throw new Error('Contract compilation failed');
-			}
-
+			if (!compiled) throw new Error('Contract compilation failed');
 			const networkConfig = this.networkManager.getNetwork(this.activeNetwork);
 			networkConfig.rpcUrl = this.activeRpcUrl;
-
 			// Get complete wallet info including private key
 			const walletInfo = this.walletManager.getWalletInfo(this.activeWallet, this.activeAddressIndex);
-			if (!walletInfo) {
-				throw new Error('Failed to get wallet information');
-			}
-
+			if (!walletInfo) throw new Error('Failed to get wallet information');
 			console.log('Deploying token...');
 			await this.deployer.deploy(tokenConfig, networkConfig, walletInfo);
 		} catch (error) {
 			console.error('Deployment failed:', error.message);
 		}
-
 		await this.waitForEnter();
 		await this.showMainMenu();
 	}
@@ -490,11 +419,9 @@ class SmartContactsDeploymentTool {
 			await this.showMainMenu();
 			return;
 		}
-
 		console.clear();
 		console.log('Token Utilities');
 		console.log('===============');
-
 		const response = await prompts({
 			type: 'select',
 			name: 'action',
@@ -526,7 +453,6 @@ class SmartContactsDeploymentTool {
 	async showTokenInfo() {
 		try {
 			const tokenInfo = await this.tokenUtils.getTokenInfo();
-
 			console.log('');
 			console.log('Token Information:');
 			console.log('==================');
@@ -540,7 +466,6 @@ class SmartContactsDeploymentTool {
 		} catch (error) {
 			console.error('Error:', error.message);
 		}
-
 		await this.waitForEnter();
 		await this.tokenUtilities();
 	}
@@ -552,7 +477,6 @@ class SmartContactsDeploymentTool {
 			await this.tokenUtilities();
 			return;
 		}
-
 		const transferData = await prompts([
 			{
 				type: 'text',
@@ -565,13 +489,11 @@ class SmartContactsDeploymentTool {
 				message: 'Amount to transfer:',
 			},
 		]);
-
 		try {
 			await this.tokenUtils.transfer(this.activeAddress.privateKey, transferData.toAddress, transferData.amount);
 		} catch (error) {
 			console.error('Transfer failed:', error.message);
 		}
-
 		await this.waitForEnter();
 		await this.tokenUtilities();
 	}
@@ -582,10 +504,10 @@ class SmartContactsDeploymentTool {
 			name: 'address',
 			message: 'Enter address to check balance:',
 		});
-
 		try {
 			const balance = await this.tokenUtils.getBalance(response.address);
-			console.log('Balance:', balance, 'tokens');
+			const tokenInfo = await this.tokenUtils.getTokenInfo();
+			console.log('Balance:', balance, tokenInfo.symbol);
 		} catch (error) {
 			console.error('Error:', error.message);
 		}

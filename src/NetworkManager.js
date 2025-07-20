@@ -35,6 +35,13 @@ export class NetworkManager {
 		return this.networks[networkName];
 	}
 
+	getNetworkByChainId(chainId) {
+		for (const networkName in this.networks) {
+			if (this.networks[networkName].chainId === chainId) return this.networks[networkName];
+		}
+		return null;
+	}
+
 	getRpcUrls(networkName) {
 		const network = this.getNetwork(networkName);
 		return network.rpcUrls;

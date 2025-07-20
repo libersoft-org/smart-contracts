@@ -3,6 +3,7 @@ node_modules/
 build/
 config/
 config/config.json
+config/deployment.json
 config/wallets.json
 .secret_git
 bun.lockb
