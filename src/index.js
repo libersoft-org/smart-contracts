@@ -14,6 +14,7 @@ class SmartContactsDeploymentTool {
 		this.networkManager = new NetworkManager();
 		this.compiler = new ContractCompiler();
 		this.deployer = new TokenDeployer();
+		this.compiler = new ContractCompiler();
 		this.tokenUtils = new TokenUtils();
 		this.activeWallet = null;
 		this.activeAddress = null;
@@ -63,7 +64,7 @@ class SmartContactsDeploymentTool {
 				{ title: '2. Select Active Wallet & Address', value: 'selectWallet' },
 				{ title: '3. Select Network & RPC', value: 'selectNetwork' },
 				{ title: '4. Block Explorer API Keys', value: 'apiKeys' },
-				{ title: '5. Deploy Token', value: 'deploy' },
+				{ title: '5. Deploy Contract', value: 'deploy' },
 				{ title: '6. Token Utilities', value: 'utils' },
 				{ title: '7. Exit', value: 'exit' },
 			],
@@ -83,7 +84,7 @@ class SmartContactsDeploymentTool {
 				await this.apiKeysManagement();
 				break;
 			case 'deploy':
-				await this.deployToken();
+				await this.deployContract();
 				break;
 			case 'utils':
 				await this.tokenUtilities();
@@ -360,57 +361,137 @@ class SmartContactsDeploymentTool {
 		await this.showMainMenu();
 	}
 
-	async deployToken() {
+	async deployContract() {
 		if (!this.activeWallet || !this.activeAddress || !this.activeNetwork || !this.activeRpcUrl) {
 			console.log('Please select wallet, address, and network first.');
 			await this.waitForEnter();
 			await this.showMainMenu();
 			return;
 		}
+
 		console.clear();
-		console.log('Deploy Token');
-		console.log('============');
-		const tokenConfig = await prompts([
-			{
-				type: 'text',
-				name: 'name',
-				message: 'Token name:',
-				initial: 'MyToken',
-			},
-			{
-				type: 'text',
-				name: 'symbol',
-				message: 'Token symbol:',
-				initial: 'MYT',
-			},
-			{
-				type: 'number',
-				name: 'decimals',
-				message: 'Decimals:',
-				initial: 18,
-			},
-			{
-				type: 'number',
-				name: 'totalSupply',
-				message: 'Total supply:',
-				initial: 1000000000,
-			},
-		]);
+		console.log('Deploy Contract');
+		console.log('===============');
 
 		try {
-			console.log('Compiling contract...');
-			const compiled = await this.compiler.compile();
-			if (!compiled) throw new Error('Contract compilation failed');
+			// Discover available contracts
+			const availableContracts = this.compiler.discoverContracts();
+			if (availableContracts.length === 0) {
+				console.log('❌ No Solidity contracts found in contracts/ directory');
+				console.log('Please add .sol files to the contracts/ folder first.');
+				await this.waitForEnter();
+				await this.showMainMenu();
+				return;
+			}
+
+			// Let user select contract file
+			const contractChoice = await prompts({
+				type: 'select',
+				name: 'contractFile',
+				message: 'Select contract to deploy:',
+				choices: availableContracts.map((file, index) => ({
+					title: file,
+					value: file,
+					description: `Contract file: ${file}`
+				}))
+			});
+
+			if (!contractChoice.contractFile) {
+				await this.showMainMenu();
+				return;
+			}
+
+			// Analyze the selected contract
+			const contractInfo = this.compiler.analyzeContract(contractChoice.contractFile);
+			console.log(`\n📋 Contract Analysis:`);
+			console.log(`   📄 File: ${contractInfo.file}`);
+			console.log(`   📜 Contracts: ${contractInfo.contracts.join(', ')}`);
+			console.log(`   📦 Imports: ${contractInfo.imports.length}`);
+			console.log(`   🔧 Constructor params: ${contractInfo.constructorParams.length}`);
+
+			// If multiple contracts in file, let user choose
+			let targetContract = contractInfo.contracts[0];
+			if (contractInfo.contracts.length > 1) {
+				const contractNameChoice = await prompts({
+					type: 'select',
+					name: 'contractName',
+					message: 'Select contract to deploy:',
+					choices: contractInfo.contracts.map(name => ({
+						title: name,
+						value: name
+					}))
+				});
+				if (!contractNameChoice.contractName) {
+					await this.showMainMenu();
+					return;
+				}
+				targetContract = contractNameChoice.contractName;
+			}
+
+			// Handle constructor parameters based on contract type
+			let constructorArgs = [];
+			let tokenConfig = null;
+
+			if (contractInfo.hasConstructor) {
+				console.log(`\n🔧 Constructor Parameters Required:`);
+				contractInfo.constructorParams.forEach((param, index) => {
+					console.log(`   ${index + 1}. ${param.name}: ${param.type}`);
+				});
+
+				// Special handling for Token contracts (backward compatibility)
+				if (targetContract === 'Token' && contractInfo.constructorParams.length === 4) {
+					console.log('\n📄 Detected Token contract - using Token configuration');
+					tokenConfig = await prompts([
+						{
+							type: 'text',
+							name: 'name',
+							message: 'Token name:',
+							initial: 'MyToken',
+						},
+						{
+							type: 'text',
+							name: 'symbol',
+							message: 'Token symbol:',
+							initial: 'MYT',
+						},
+						{
+							type: 'number',
+							name: 'decimals',
+							message: 'Decimals:',
+							initial: 18,
+						},
+						{
+							type: 'number',
+							name: 'totalSupply',
+							message: 'Total supply:',
+							initial: 1000000000,
+						},
+					]);
+				} else {
+					// Generic constructor parameter input
+					console.log('\n⚠️  Generic contract detected');
+					console.log('Constructor parameters will be handled automatically');
+					console.log('For complex parameters, modify the deploy method manually');
+				}
+			}
+
+			// Proceed with deployment
+			console.log('\n🔨 Compiling contract...');
 			const networkConfig = this.networkManager.getNetwork(this.activeNetwork);
 			networkConfig.rpcUrl = this.activeRpcUrl;
+
 			// Get complete wallet info including private key
 			const walletInfo = this.walletManager.getWalletInfo(this.activeWallet, this.activeAddressIndex);
 			if (!walletInfo) throw new Error('Failed to get wallet information');
-			console.log('Deploying token...');
-			await this.deployer.deploy(tokenConfig, networkConfig, walletInfo);
+
+			console.log('\n🚀 Starting deployment...');
+			// Call universal deploy
+			await this.deployer.deploy(tokenConfig, networkConfig, walletInfo, contractChoice.contractFile, targetContract);
+
 		} catch (error) {
-			console.error('Deployment failed:', error.message);
+			console.error('❌ Deployment failed:', error.message);
 		}
+
 		await this.waitForEnter();
 		await this.showMainMenu();
 	}

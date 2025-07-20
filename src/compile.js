@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'fs';
+import { join, extname, basename } from 'path';
 
 const execAsync = promisify(exec);
 
@@ -14,246 +15,281 @@ export class ContractCompiler {
 		if (!existsSync(this.buildDir)) mkdirSync(this.buildDir, { recursive: true });
 	}
 
-	async compile() {
+	/**
+	 * Discover all Solidity contracts in the contracts directory
+	 */
+	discoverContracts() {
+		if (!existsSync(this.contractsDir)) {
+			console.log('⚠️  No contracts directory found');
+			return [];
+		}
+
+		const files = readdirSync(this.contractsDir);
+		const solidityFiles = files.filter(file => extname(file) === '.sol');
+		
+		console.log(`📁 Found ${solidityFiles.length} Solidity files:`);
+		solidityFiles.forEach((file, index) => {
+			console.log(`   ${index + 1}. ${file}`);
+		});
+
+		return solidityFiles;
+	}
+
+	/**
+	 * Analyze a Solidity file to extract contract information
+	 */
+	analyzeContract(contractFile) {
+		const contractPath = join(this.contractsDir, contractFile);
+		const content = readFileSync(contractPath, 'utf8');
+		
+		// Extract contract names
+		const contractMatches = content.match(/contract\s+(\w+)/g) || [];
+		const contracts = contractMatches.map(match => match.replace('contract ', ''));
+		
+		// Extract imports
+		const importMatches = content.match(/import\s+['"](.*?)['"]/g) || [];
+		const imports = importMatches.map(match => {
+			const importPath = match.match(/['"](.*?)['"]/)[1];
+			return importPath;
+		});
+
+		// Extract pragma version
+		const pragmaMatch = content.match(/pragma\s+solidity\s+([^;]+)/);
+		const solidityVersion = pragmaMatch ? pragmaMatch[1] : '^0.8.0';
+
+		// Try to detect constructor parameters
+		const constructorMatch = content.match(/constructor\s*\(([^)]*)\)/);
+		let constructorParams = [];
+		if (constructorMatch && constructorMatch[1].trim()) {
+			const paramsString = constructorMatch[1];
+			// Simple parsing - could be improved for complex types
+			constructorParams = paramsString.split(',').map(param => {
+				const parts = param.trim().split(/\s+/);
+				const type = parts[0];
+				const name = parts[parts.length - 1];
+				return { type, name };
+			});
+		}
+
+		return {
+			file: contractFile,
+			contracts,
+			imports,
+			solidityVersion,
+			constructorParams,
+			hasConstructor: constructorParams.length > 0
+		};
+	}
+
+	/**
+	 * Universal contract compilation
+	 */
+	async compile(contractFile = null, targetContract = null) {
 		try {
-			console.log('Compiling Solidity contract...');
+			console.log('🔨 Starting universal contract compilation...');
 			this.ensureBuildDirectory();
 
+			// If no specific contract provided, discover available contracts
+			if (!contractFile) {
+				const availableContracts = this.discoverContracts();
+				if (availableContracts.length === 0) {
+					console.error('❌ No Solidity contracts found in contracts/ directory');
+					return false;
+				}
+				
+				// For now, use the first contract found
+				// In future, this could be interactive selection
+				contractFile = availableContracts[0];
+				console.log(`📄 Auto-selected: ${contractFile}`);
+			}
+
+			// Analyze the contract
+			const contractInfo = this.analyzeContract(contractFile);
+			console.log(`📋 Contract analysis:`);
+			console.log(`   📄 File: ${contractInfo.file}`);
+			console.log(`   📜 Contracts: ${contractInfo.contracts.join(', ')}`);
+			console.log(`   📦 Imports: ${contractInfo.imports.length}`);
+			console.log(`   🔧 Constructor params: ${contractInfo.constructorParams.length}`);
+
+			// Determine target contract name
+			if (!targetContract) {
+				targetContract = contractInfo.contracts[0]; // Use first contract in file
+			}
+
+			const buildFile = `./build/${basename(contractFile, '.sol')}.json`;
+
 			// Check if we already have a compiled contract
-			const existingContractPath = './build/Token.json';
-			if (existsSync(existingContractPath)) {
+			if (existsSync(buildFile)) {
 				try {
-					const existingContract = JSON.parse(readFileSync(existingContractPath, 'utf8'));
+					const existingContract = JSON.parse(readFileSync(buildFile, 'utf8'));
 					if (existingContract.abi && existingContract.bytecode) {
-						console.log('✓ Using existing compiled contract from build/Token.json');
-						return true;
+						console.log(`✓ Using existing compiled contract from ${buildFile}`);
+						return { 
+							success: true, 
+							contractInfo,
+							buildFile,
+							contractName: targetContract
+						};
 					}
 				} catch (error) {
 					console.log('Existing contract file is invalid, recompiling...');
 				}
 			}
 
-			// Try programmatic compilation first (most reliable)
-			try {
-				console.log('Attempting OpenZeppelin compilation...');
-				const { execSync } = await import('child_process');
-				execSync('bun run compile-openzeppelin.js', { stdio: 'inherit', cwd: process.cwd() });
+			// Try universal compilation
+			const compilationResult = await this.universalCompile(contractFile, targetContract);
+			
+			if (compilationResult.success) {
+				// Save the compilation result
+				writeFileSync(buildFile, JSON.stringify({
+					contractName: targetContract,
+					abi: compilationResult.abi,
+					bytecode: compilationResult.bytecode,
+					deployedBytecode: compilationResult.deployedBytecode,
+					contractInfo: contractInfo,
+					compiledAt: new Date().toISOString()
+				}, null, 2));
 
-				// Check if compilation succeeded
-				if (existsSync(existingContractPath)) {
-					const contract = JSON.parse(readFileSync(existingContractPath, 'utf8'));
-					if (contract.abi && contract.bytecode) {
-						console.log('✓ Contract compiled successfully with OpenZeppelin compiler');
-						return true;
-					}
-				}
-			} catch (progError) {
-				console.log('Programmatic compilation failed:', progError.message);
+				console.log(`✓ Contract compiled successfully: ${targetContract}`);
+				console.log(`✓ Results saved to ${buildFile}`);
+				
+				return { 
+					success: true, 
+					contractInfo,
+					buildFile,
+					contractName: targetContract,
+					abi: compilationResult.abi,
+					bytecode: compilationResult.bytecode
+				};
+			} else {
+				console.error('❌ All compilation methods failed');
+				return { success: false };
 			}
 
-			const contractPath = './contracts/Token.sol';
+		} catch (error) {
+			console.error('❌ Compilation failed:', error.message);
+			return { success: false, error: error.message };
+		}
+	}
 
-			// Try using local solcjs with separate ABI and bin compilation
-			try {
-				// Use solcjs with --abi and --bin separately, outputting to build directory
-				const abiCommand = 'node_modules\\.bin\\solcjs --abi --include-path ./node_modules/ --base-path . -o ./build ' + contractPath;
-				const binCommand = 'node_modules\\.bin\\solcjs --bin --include-path ./node_modules/ --base-path . -o ./build ' + contractPath;
+	/**
+	 * Universal compilation method that tries multiple approaches
+	 */
+	async universalCompile(contractFile, targetContract) {
+		const contractPath = join(this.contractsDir, contractFile);
 
-				console.log('Compiling ABI...');
-				await execAsync(abiCommand);
-				console.log('Compiling bytecode...');
-				await execAsync(binCommand);
-
-				// Read the generated files
-				const abiFile = './build/contracts_Token_sol_Token.abi';
-				const binFile = './build/contracts_Token_sol_Token.bin';
-
-				if (!existsSync(abiFile) || !existsSync(binFile)) {
-					throw new Error('Compilation output files not found');
-				}
-
-				const abi = JSON.parse(readFileSync(abiFile, 'utf8'));
-				const bytecode = '0x' + readFileSync(binFile, 'utf8').trim();
-
-				writeFileSync(
-					'./build/Token.json',
-					JSON.stringify(
-						{
-							abi,
-							bytecode,
-						},
-						null,
-						2
-					)
-				);
-
-				console.log('✓ Contract compiled successfully with solcjs');
-				console.log('✓ Results saved to build/Token.json');
-				return true;
-			} catch (localSolcError) {
-				console.log('Local solcjs compilation failed:', localSolcError.message);
-				// Fallback to global solc if local solcjs fails
-				const command = 'solc --combined-json abi,bin --include-path ./node_modules/ --base-path . ' + contractPath;
-				try {
-					const { stdout } = await execAsync(command);
-					const compiledContract = JSON.parse(stdout);
-					const contractName = 'contracts/Token.sol:Token';
-					const contract = compiledContract.contracts[contractName];
-					if (!contract) {
-						throw new Error('Contract not found in compiled results');
-					}
-					const abi = JSON.parse(contract.abi);
-					const bytecode = contract.bin;
-					writeFileSync(
-						'./build/Token.json',
-						JSON.stringify(
-							{
-								abi,
-								bytecode: '0x' + bytecode,
-							},
-							null,
-							2
-						)
-					);
-
-					console.log('✓ Contract compiled successfully with global solc');
-					console.log('✓ Results saved to build/Token.json');
-					return true;
-				} catch (solcError) {
-					console.warn('Neither solcjs nor solc is available or compilation failed');
-					console.log('Creating mock ABI and bytecode for demonstration...');
-
-					const mockAbi = [
-						{
-							inputs: [
-								{ internalType: 'string', name: '_name', type: 'string' },
-								{ internalType: 'string', name: '_symbol', type: 'string' },
-								{ internalType: 'uint8', name: '_decimals', type: 'uint8' },
-								{ internalType: 'uint256', name: '_totalSupply', type: 'uint256' },
-							],
-							stateMutability: 'nonpayable',
-							type: 'constructor',
-						},
-						{
-							anonymous: false,
-							inputs: [
-								{ indexed: true, internalType: 'address', name: 'owner', type: 'address' },
-								{ indexed: true, internalType: 'address', name: 'spender', type: 'address' },
-								{ indexed: false, internalType: 'uint256', name: 'value', type: 'uint256' },
-							],
-							name: 'Approval',
-							type: 'event',
-						},
-						{
-							anonymous: false,
-							inputs: [
-								{ indexed: true, internalType: 'address', name: 'from', type: 'address' },
-								{ indexed: true, internalType: 'address', name: 'to', type: 'address' },
-								{ indexed: false, internalType: 'uint256', name: 'value', type: 'uint256' },
-							],
-							name: 'Transfer',
-							type: 'event',
-						},
-						{
-							inputs: [
-								{ internalType: 'address', name: 'owner', type: 'address' },
-								{ internalType: 'address', name: 'spender', type: 'address' },
-							],
-							name: 'allowance',
-							outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-							stateMutability: 'view',
-							type: 'function',
-						},
-						{
-							inputs: [
-								{ internalType: 'address', name: 'spender', type: 'address' },
-								{ internalType: 'uint256', name: 'amount', type: 'uint256' },
-							],
-							name: 'approve',
-							outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
-							stateMutability: 'nonpayable',
-							type: 'function',
-						},
-						{
-							inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
-							name: 'balanceOf',
-							outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-							stateMutability: 'view',
-							type: 'function',
-						},
-						{
-							inputs: [],
-							name: 'decimals',
-							outputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
-							stateMutability: 'view',
-							type: 'function',
-						},
-						{
-							inputs: [],
-							name: 'name',
-							outputs: [{ internalType: 'string', name: '', type: 'string' }],
-							stateMutability: 'view',
-							type: 'function',
-						},
-						{
-							inputs: [],
-							name: 'symbol',
-							outputs: [{ internalType: 'string', name: '', type: 'string' }],
-							stateMutability: 'view',
-							type: 'function',
-						},
-						{
-							inputs: [],
-							name: 'totalSupply',
-							outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-							stateMutability: 'view',
-							type: 'function',
-						},
-						{
-							inputs: [
-								{ internalType: 'address', name: 'to', type: 'address' },
-								{ internalType: 'uint256', name: 'amount', type: 'uint256' },
-							],
-							name: 'transfer',
-							outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
-							stateMutability: 'nonpayable',
-							type: 'function',
-						},
-						{
-							inputs: [
-								{ internalType: 'address', name: 'from', type: 'address' },
-								{ internalType: 'address', name: 'to', type: 'address' },
-								{ internalType: 'uint256', name: 'amount', type: 'uint256' },
-							],
-							name: 'transferFrom',
-							outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
-							stateMutability: 'nonpayable',
-							type: 'function',
-						},
-					];
-
-					const mockBytecode = '0x608060405234801561001057600080fd5b506040516108d03803806108d08339810160408190526100349161014a565b600361004083826101c7565b50600461004d82826101c7565b50506040805180820182526007548152600860209091019081529051600654600160a01b026001600160a01b031916179055506100b833611f40026008819055506000829055600781905560018190556040805192835260208301919091520160405180910390a350610285565b634e487b7160e01b600052604160045260246000fd5b600082601f8301126100fc57600080fd5b81516001600160401b0380821115610116576101166100d5565b604051601f8301601f19908116603f0116810190828211818310171561013e5761013e6100d5565b81604052838152602092508683858801011115610159575050565b5050600160a01b031690565b6000806000806080858703121561018157600080fd5b84516001600160401b0381111561019757600080fd5b6101a3878288016100eb565b94505060208501516001600160401b038111156101bf57600080fd5b6101cb878288016100eb565b935050604085015160ff811681146101e257600080fd5b6060959095015193969295505050565b600181811c9082168061020657607f821691505b60208210810361022657634e487b7160e01b600052602260045260246000fd5b50919050565b601f82111561027f57600081815260208120601f850160051c8101602086101561025357505b601f850160051c820191505b81811015610272578281556001016102635b5050505b505050565b81516001600160401b0381111561029c5761029c6100d5565b6102b0816102aa84546101f2565b8461022c565b602080601f8311600181146102e557600084156102cd5750858301515b600019600386901b1c1916600185901b178555610272565b600085815260208120601f198616915b8281101561031457888601518255948401946001909101908401610155565b50858210156103325787850151600019600388901b60f8161c191681555b5050505050600190811b01905550565b610637806103516000396000f3fe';
-
-					writeFileSync(
-						'./build/Token.json',
-						JSON.stringify(
-							{
-								abi: mockAbi,
-								bytecode: mockBytecode,
-							},
-							null,
-							2
-						)
-					);
-
-					console.log('✓ Mock contract ABI created for demonstration');
-					console.log('Note: For real use, install solc: npm install -g solc');
-					return true;
-				}
+		// Method 1: Try solc with dynamic import resolution
+		try {
+			console.log('🔧 Attempting solc compilation with import resolution...');
+			
+			const command = `solc --combined-json abi,bin --include-path ./node_modules/ --base-path . ${contractPath}`;
+			const { stdout } = await execAsync(command);
+			
+			const compiledContract = JSON.parse(stdout);
+			const contractKey = `${contractPath}:${targetContract}`;
+			const contract = compiledContract.contracts[contractKey];
+			
+			if (contract) {
+				return {
+					success: true,
+					abi: JSON.parse(contract.abi),
+					bytecode: '0x' + contract.bin,
+					deployedBytecode: null
+				};
 			}
 		} catch (error) {
-			console.error('Compilation failed:', error.message);
-			return false;
+			console.log('Method 1 failed:', error.message);
 		}
+
+		// Method 2: Try solcjs with dynamic paths
+		try {
+			console.log('🔧 Attempting solcjs compilation...');
+			
+			const abiCommand = `node_modules\\.bin\\solcjs --abi --include-path ./node_modules/ --base-path . -o ./build ${contractPath}`;
+			const binCommand = `node_modules\\.bin\\solcjs --bin --include-path ./node_modules/ --base-path . -o ./build ${contractPath}`;
+
+			await execAsync(abiCommand);
+			await execAsync(binCommand);
+
+			// Try to find the generated files
+			const buildFiles = readdirSync('./build');
+			const abiFile = buildFiles.find(f => f.includes(basename(contractFile, '.sol')) && f.includes(targetContract) && f.endsWith('.abi'));
+			const binFile = buildFiles.find(f => f.includes(basename(contractFile, '.sol')) && f.includes(targetContract) && f.endsWith('.bin'));
+
+			if (abiFile && binFile) {
+				const abi = JSON.parse(readFileSync(join('./build', abiFile), 'utf8'));
+				const bytecode = '0x' + readFileSync(join('./build', binFile), 'utf8').trim();
+
+				return {
+					success: true,
+					abi,
+					bytecode,
+					deployedBytecode: null
+				};
+			}
+		} catch (error) {
+			console.log('Method 2 failed:', error.message);
+		}
+
+		// Method 3: Try programmatic solc compilation
+		try {
+			console.log('🔧 Attempting programmatic solc compilation...');
+			
+			const solc = require('solc');
+			const contractContent = readFileSync(contractPath, 'utf8');
+			
+			// Create import resolver
+			const findImports = (importPath) => {
+				const possiblePaths = [
+					join('./node_modules', importPath),
+					join('./contracts', importPath),
+					importPath
+				];
+				
+				for (const fullPath of possiblePaths) {
+					if (existsSync(fullPath)) {
+						return { contents: readFileSync(fullPath, 'utf8') };
+					}
+				}
+				return { error: 'File not found' };
+			};
+
+			const input = {
+				language: 'Solidity',
+				sources: {
+					[contractFile]: {
+						content: contractContent,
+					},
+				},
+				settings: {
+					outputSelection: {
+						'*': {
+							'*': ['abi', 'evm.bytecode', 'evm.deployedBytecode'],
+						},
+					},
+					optimizer: {
+						enabled: true,
+						runs: 200,
+					},
+				},
+			};
+
+			const output = JSON.parse(solc.compile(JSON.stringify(input), { import: findImports }));
+			
+			if (output.contracts && output.contracts[contractFile] && output.contracts[contractFile][targetContract]) {
+				const contract = output.contracts[contractFile][targetContract];
+				
+				return {
+					success: true,
+					abi: contract.abi,
+					bytecode: '0x' + contract.evm.bytecode.object,
+					deployedBytecode: contract.evm.deployedBytecode ? '0x' + contract.evm.deployedBytecode.object : null
+				};
+			}
+		} catch (error) {
+			console.log('Method 3 failed:', error.message);
+		}
+
+		return { success: false };
 	}
 }
