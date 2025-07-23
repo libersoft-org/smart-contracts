@@ -8,6 +8,13 @@ export class TokenDeployer {
 		this.deploymentFile = './config/deployment.json';
 		this.verifier = new ContractVerifier();
 		this.compiler = new ContractCompiler();
+		this.debug = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+	}
+
+	debugLog(message) {
+		if (this.debug) {
+			console.log(message);
+		}
 	}
 
 	async deploy(tokenConfig, networkConfig, walletInfo, contractFile = null, contractName = null) {
@@ -15,36 +22,61 @@ export class TokenDeployer {
 			console.log('🚀 Starting universal contract deployment...');
 			console.log('📡 Network:', networkConfig.name);
 			
-			// Minimal compilation - just get existing compiled contract
-			const buildFile = './build/Token.json';
-			if (!existsSync(buildFile)) {
-				throw new Error('Contract not compiled. Please compile first.');
+			// Compile the contract
+			this.debugLog('🔍 [DEBUG] Starting compilation process...');
+			const compilationResult = await this.compiler.compile(contractFile, contractName);
+			
+			if (!compilationResult.success) {
+				throw new Error('Contract compilation failed. Check compilation logs above.');
 			}
 			
-			const contractJson = JSON.parse(readFileSync(buildFile, 'utf8'));
-			const { abi, bytecode } = contractJson;
+			this.debugLog('🔍 [DEBUG] Compilation successful, using compiled contract');
+			this.debugLog('🔍 [DEBUG] Compilation result keys:' + JSON.stringify(Object.keys(compilationResult)));
+			this.debugLog('🔍 [DEBUG] Compilation result:' + JSON.stringify(compilationResult, null, 2));
 			
-			console.log('� Contract: Token');
+			const { abi, bytecode, contractName: compiledContractName } = compilationResult;
+			this.debugLog('🔍 [DEBUG] Extracted abi:' + (abi ? `Array with ${abi.length} entries` : 'undefined'));
+			this.debugLog('🔍 [DEBUG] Extracted bytecode:' + (bytecode ? `${bytecode.substring(0, 50)}...` : 'undefined'));
+			this.debugLog('🔍 [DEBUG] Extracted contractName:' + compiledContractName);
+			
+			const finalContractName = compiledContractName || contractName || 'Contract';
+			
+			console.log(`📄 Contract: ${finalContractName}`);
 
 			// Connect to network
+			this.debugLog('🔍 [DEBUG] Connecting to network...');
+			this.debugLog('🔍 [DEBUG] RPC URL:' + networkConfig.rpcUrl);
 			let provider;
 			if (networkConfig.rpcUrl.startsWith('wss://') || networkConfig.rpcUrl.startsWith('ws://')) {
 				provider = new ethers.WebSocketProvider(networkConfig.rpcUrl);
 			} else {
 				provider = new ethers.JsonRpcProvider(networkConfig.rpcUrl);
 			}
+			this.debugLog('🔍 [DEBUG] Provider created');
 			
+			this.debugLog('🔍 [DEBUG] Creating wallet...');
+			this.debugLog('🔍 [DEBUG] Wallet info keys:' + JSON.stringify(Object.keys(walletInfo)));
 			const wallet = new ethers.Wallet(walletInfo.privateKey, provider);
+			this.debugLog('🔍 [DEBUG] Wallet created');
 			console.log('💼 Deploying from address:', walletInfo.address);
 
 			// Check balance
+			this.debugLog('🔍 [DEBUG] Checking balance...');
 			const balance = await provider.getBalance(walletInfo.address);
+			this.debugLog('🔍 [DEBUG] Balance retrieved:' + balance.toString());
 			console.log('💰 Account balance:', ethers.formatEther(balance), networkConfig.nativeCurrency.symbol);
 
 			// Create contract factory
+			this.debugLog('🔍 [DEBUG] Creating contract factory...');
+			this.debugLog('🔍 [DEBUG] ABI length:' + abi.length);
+			this.debugLog('🔍 [DEBUG] Bytecode length:' + bytecode.length);
 			const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+			this.debugLog('🔍 [DEBUG] Contract factory created');
 
 			// Simple Token deployment
+			this.debugLog('🔍 [DEBUG] Preparing constructor arguments...');
+			this.debugLog('🔍 [DEBUG] tokenConfig:' + JSON.stringify(tokenConfig, null, 2));
+			
 			const constructorArgs = [
 				tokenConfig.name,
 				tokenConfig.symbol, 
@@ -52,6 +84,7 @@ export class TokenDeployer {
 				ethers.parseUnits(tokenConfig.totalSupply.toString(), tokenConfig.decimals)
 			];
 
+			this.debugLog('🔍 [DEBUG] Constructor args prepared:' + JSON.stringify(constructorArgs.map(arg => typeof arg === 'bigint' ? arg.toString() : arg)));
 			console.log('⛽ Using default gas limit');
 
 			// Deploy contract
@@ -72,7 +105,7 @@ export class TokenDeployer {
 			// Save deployment information
 			const deploymentInfo = {
 				contractAddress: contractAddress,
-				contractName: 'Token',
+				contractName: finalContractName,
 				deployer: walletInfo.address,
 				networkChainId: networkConfig.chainId,
 				token: tokenConfig,
